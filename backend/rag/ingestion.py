@@ -1,33 +1,34 @@
 import hashlib
-import re
+import os
 from pathlib import Path
 from typing import List
 
-import fitz  # PyMuPDF
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
+from .chunking import CHUNK_OVERLAP, CHUNK_SIZE, chunk_text  # noqa: F401  (re-exported)
 
-CHROMA_PATH = Path(__file__).parent.parent / "chroma_db"
+# Heavy ML dependencies are imported lazily so the API/unit tests start instantly.
+CHROMA_PATH = Path(os.getenv("CHROMA_PATH", Path(__file__).parent.parent / "chroma_db"))
 COLLECTION_NAME = "documents"
-CHUNK_SIZE = 800
-CHUNK_OVERLAP = 150
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
-_embedder: SentenceTransformer | None = None
-_client: chromadb.PersistentClient | None = None
+_embedder = None
+_client = None
 _collection = None
 
 
-def get_embedder() -> SentenceTransformer:
+def get_embedder():
     global _embedder
     if _embedder is None:
-        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        from sentence_transformers import SentenceTransformer
+
+        _embedder = SentenceTransformer(EMBEDDING_MODEL)
     return _embedder
 
 
 def get_collection():
     global _client, _collection
     if _client is None:
+        import chromadb
+
         CHROMA_PATH.mkdir(parents=True, exist_ok=True)
         _client = chromadb.PersistentClient(path=str(CHROMA_PATH))
     if _collection is None:
@@ -39,36 +40,14 @@ def get_collection():
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
+    import fitz  # PyMuPDF
+
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     pages = []
     for page in doc:
         pages.append(page.get_text())
     doc.close()
     return "\n".join(pages)
-
-
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    # Split on sentences, then group into chunks
-    sentences = re.split(r"(?<=[.!?])\s+", text.replace("\n", " "))
-    chunks, current, current_len = [], [], 0
-    for sent in sentences:
-        sent_len = len(sent)
-        if current_len + sent_len > chunk_size and current:
-            chunks.append(" ".join(current))
-            # keep overlap
-            overlap_chars, overlap_sents = 0, []
-            for s in reversed(current):
-                if overlap_chars + len(s) > overlap:
-                    break
-                overlap_sents.insert(0, s)
-                overlap_chars += len(s)
-            current = overlap_sents
-            current_len = overlap_chars
-        current.append(sent)
-        current_len += sent_len
-    if current:
-        chunks.append(" ".join(current))
-    return [c.strip() for c in chunks if c.strip()]
 
 
 def ingest_document(filename: str, file_bytes: bytes) -> dict:
@@ -94,7 +73,7 @@ def ingest_document(filename: str, file_bytes: bytes) -> dict:
     # Build IDs and metadata
     ids, metadatas = [], []
     for i, chunk in enumerate(chunks):
-        chunk_hash = hashlib.md5(f"{filename}_{i}_{chunk[:50]}".encode()).hexdigest()
+        chunk_hash = hashlib.sha1(f"{filename}_{i}_{chunk[:50]}".encode()).hexdigest()
         ids.append(chunk_hash)
         metadatas.append({"source": filename, "chunk_index": i})
 

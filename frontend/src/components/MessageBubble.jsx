@@ -44,6 +44,19 @@ export default function MessageBubble({ message }) {
           </div>
         )}
 
+        {/* Agent trace: what the agent searched for */}
+        {!isUser && message.trace?.queries?.length > 0 && (
+          <details className="text-[11px] text-gray-500 px-1">
+            <summary className="cursor-pointer select-none">
+              Agent searched {message.trace.queries.length} quer{message.trace.queries.length === 1 ? 'y' : 'ies'} ·
+              {' '}{message.trace.kept_after_grading}/{message.trace.retrieved} passages kept
+            </summary>
+            <ul className="list-disc ml-4 mt-1">
+              {message.trace.queries.map((q) => <li key={q}>{q}</li>)}
+            </ul>
+          </details>
+        )}
+
         {/* Model tag */}
         {!isUser && message.model && message.model !== 'none' && (
           <span className="text-[10px] text-gray-400 px-1">via {message.model}</span>

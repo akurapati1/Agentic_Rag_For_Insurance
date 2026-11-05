@@ -39,6 +39,7 @@ export default function ChatPanel({ documentCount }) {
         content: data.answer,
         sources: data.sources,
         model: data.model,
+        trace: data.trace,
       }
       setMessages((prev) => [...prev, assistantMsg])
     } catch (e) {
